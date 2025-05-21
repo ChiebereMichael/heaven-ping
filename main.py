@@ -10,7 +10,6 @@ from flask import Flask
 from threading import Thread
 from dotenv import load_dotenv
 import sys
-from telegram.error import Conflict, NetworkError
 
 # Load environment variables
 load_dotenv()
@@ -136,18 +135,19 @@ async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Unsubscribe error: {str(e)}")
         await update.message.reply_text("❌ Could not unsubscribe. Please try again.")
 
-# Error handler
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.error(f"Exception while handling an update: {context.error}")
-    if isinstance(context.error, Conflict):
-        logger.error("Another bot instance is running!")
-    elif isinstance(context.error, NetworkError):
-        logger.error("Network error occurred")
-
 # Main bot logic
 def main():
     application = None
     try:
+        # Check job queue dependency
+        try:
+            from telegram.ext import JobQueue
+        except ImportError:
+            logger.error("JobQueue not available. Installing dependencies...")
+            import subprocess
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "python-telegram-bot[job-queue]"])
+            from telegram.ext import JobQueue
+        
         # Initialize application
         application = (
             ApplicationBuilder()
@@ -155,9 +155,6 @@ def main():
             .persistence(PicklePersistence(filepath="bot_data"))
             .build()
         )
-        
-        # Add error handler
-        application.add_error_handler(error_handler)
         
         # Register handlers
         application.add_handler(CommandHandler("start", start))
@@ -173,25 +170,11 @@ def main():
         )
 
         logger.info("Bot starting...")
+        application.run_polling(allowed_updates=Update.ALL_TYPES)
         
-        # Use webhooks in production
-        if os.getenv("ENVIRONMENT") == "production":
-            port = int(os.getenv("PORT", "8080"))
-            application.run_webhook(
-                listen="0.0.0.0",
-                port=port,
-                webhook_url=os.getenv("WEBHOOK_URL"),
-                allowed_updates=Update.ALL_TYPES
-            )
-        else:
-            application.run_polling(allowed_updates=Update.ALL_TYPES)
-            
     except Exception as e:
         logger.error(f"Critical startup error: {e}")
         raise
-    finally:
-        if application:
-            application.stop()
 
 if __name__ == "__main__":
     try:
