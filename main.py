@@ -1,6 +1,6 @@
 import logging
 import asyncio
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, Application, JobQueue, PicklePersistence
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, Application, PicklePersistence
 from telegram import Update
 from quotes import get_random_quote
 import datetime
@@ -9,6 +9,7 @@ from server import app, run as run_server
 from flask import Flask
 from threading import Thread
 from dotenv import load_dotenv
+import sys
 
 # Load environment variables
 load_dotenv()
@@ -138,25 +139,22 @@ async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     application = None
     try:
-        # Setup persistence
-        persistence = PicklePersistence(filepath="bot_data")
+        # Check job queue dependency
+        try:
+            from telegram.ext import JobQueue
+        except ImportError:
+            logger.error("JobQueue not available. Installing dependencies...")
+            import subprocess
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "python-telegram-bot[job-queue]"])
+            from telegram.ext import JobQueue
         
-        # Initialize application with job queue
+        # Initialize application
         application = (
             ApplicationBuilder()
             .token(TELEGRAM_BOT_TOKEN)
-            .persistence(persistence)
-            .job_queue(JobQueue())  # Explicitly create job queue
+            .persistence(PicklePersistence(filepath="bot_data"))
             .build()
         )
-        
-        # Verify job queue is available
-        if not application.job_queue:
-            logger.error("Job queue not available. Please install python-telegram-bot[job-queue]")
-            raise RuntimeError("Job queue required but not available")
-            
-        # Start the job queue
-        application.job_queue.start()
         
         # Register handlers
         application.add_handler(CommandHandler("start", start))
@@ -171,21 +169,21 @@ def main():
             when=0
         )
 
-        logger.info("Bot starting with job queue enabled...")
+        logger.info("Bot starting...")
         application.run_polling(allowed_updates=Update.ALL_TYPES)
         
     except Exception as e:
         logger.error(f"Critical startup error: {e}")
         raise
-    finally:
-        # Cleanup
-        if application and hasattr(application, 'job_queue') and application.job_queue:
-            application.job_queue.stop()
 
 if __name__ == "__main__":
-    # Start web server in a separate thread
-    server_thread = Thread(target=run_server, daemon=True)
-    server_thread.start()
-    
-    # Start the bot
-    main()
+    try:
+        # Start web server in background
+        server_thread = Thread(target=run_server, daemon=True)
+        server_thread.start()
+        
+        # Start bot
+        main()
+    except KeyboardInterrupt:
+        print("\nShutting down gracefully...")
+        sys.exit(0)
