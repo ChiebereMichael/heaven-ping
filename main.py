@@ -5,6 +5,9 @@ from telegram import Update
 from quotes import get_random_quote
 import datetime
 import os
+from server import app, run as run_server
+from flask import Flask
+from threading import Thread
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -180,4 +183,9 @@ def main():
             application.job_queue.stop()
 
 if __name__ == "__main__":
+    # Start web server in a separate thread
+    server_thread = Thread(target=run_server, daemon=True)
+    server_thread.start()
+    
+    # Start the bot
     main()
